@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from motion import align_image
+import numpy as np
 
 class Spatial_block(nn.Module):
     def __init__(self, input_channels = 3):   # RBG
@@ -81,3 +83,44 @@ class Temporal_block(nn.Module):
         x3 = self.conv3(x1+x2)
         x3 = self.pixelshuffle(x3)
         return x3
+
+
+
+class DVDnetFull(nn.Module):
+    def __init__(self, spatial_model, temporal_model, num_input_frames=5):
+        super(DVDnetFull, self).__init__()
+        self.spatial_model = spatial_model
+        self.temporal_model = temporal_model
+        self.num_input_frames = num_input_frames
+        self.center = (num_input_frames - 1) // 2
+    def forward(self, x, noise_map):
+        B, CT, H, W = x.shape # (B, num_frames*C, H, W)
+        C = CT // self.num_input_frames
+        x_seq = x.view(B, self.num_input_frames, C, H, W)  # [B, T, C, H, W]
+        spatial_outputs = []
+        for t in range(self.num_input_frames):
+            out = self.spatial_model(x_seq[:, t], noise_map)  # [B, C, H, W]
+            spatial_outputs.append(out)
+        spatial_stack = torch.stack(spatial_outputs, dim=1)  # [B, T, C, H, W]
+        aligned = []
+        center_img = spatial_stack[:, self.center, :, :, :]  # [B, C, H, W]
+        for t in range(self.num_input_frames):
+            if t == self.center:
+                aligned.append(center_img)
+                continue
+            warped_list = []
+            for b in range(B):
+                src = spatial_stack[b, t] # (C,H,W)
+                tgt = center_img[b]
+                aligned_np = align_image(src, tgt)
+                # (H, W, 3), np.uint8
+                aligned_tensor = torch.from_numpy(aligned_np.astype(np.float32).transpose(2, 0, 1) / 255.0)
+                warped_list.append(aligned_tensor.to(x.device))
+            aligned.append(torch.stack(warped_list, dim=0))
+            # [B, C, H, W]
+        aligned_stack = torch.stack(aligned, dim=1)
+        # [B, T, C, H, W]
+        aligned_input = aligned_stack.view(B, -1, H, W)
+        # [B, T*C, H, W]
+        out = self.temporal_model(aligned_input, noise_map)  # [B, C, H, W]
+        return out

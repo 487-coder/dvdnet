@@ -13,7 +13,7 @@ def prepare_image(image):
             image = image.squeeze(0)
         else:
             raise ValueError('expect batch size of 1 image')
-    if len(image.shape) == 3:
+    if len(image.shape) == 3: # (C,H,W)
         if image.shape[0] == 3:
             image = image.permute(1, 2, 0)
             if image.max() <= 1.0:
