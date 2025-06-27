@@ -1,0 +1,8 @@
+# Requirements for dvdnet project
+numpy
+torch>=1.7
+torchvision>=0.8
+opencv-python
+imageio
+scikit-image
+tensorboard
